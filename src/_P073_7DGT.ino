@@ -38,6 +38,8 @@
 #define P073_TM1637_4DGTDOTS    1
 #define P073_TM1637_6DGT        2
 #define P073_MAX7219_8DGT       3
+#define P073_MAX7219_MATRIX     4
+
 
 #define P073_DISP_MANUAL        0
 #define P073_DISP_CLOCK24BLNK   1
@@ -46,11 +48,12 @@
 #define P073_DISP_CLOCK12       4
 #define P073_DISP_DATE          5
 
+#include <MD_MAX72xx.h>
 #include "_Plugin_Helper.h"
 struct P073_data_struct : public PluginTaskData_base {
   P073_data_struct()
     : dotpos(-1), pin1(-1), pin2(-1), pin3(-1), displayModel(0), output(0),
-    brightness(0), timesep(false), shift(false) {
+    brightness(0), matrixHW(MD_MAX72XX::GENERIC_HW), matrixCount(4), timesep(false), shift(false) {
     ClearBuffer();
   }
 
@@ -168,6 +171,8 @@ struct P073_data_struct : public PluginTaskData_base {
   byte    displayModel;
   byte    output;
   byte    brightness;
+  byte    matrixHW;
+  uint8_t matrixCount;
   bool    timesep;
   bool    shift;
 };
@@ -255,11 +260,12 @@ boolean Plugin_073(byte function, struct EventStruct *event, String& string) {
     case PLUGIN_WEBFORM_LOAD: {
       addFormNote(F("TM1637:  1st=CLK-Pin, 2nd=DIO-Pin"));
       addFormNote(F("MAX7219: 1st=DIN-Pin, 2nd=CLK-Pin, 3rd=CS-Pin"));
-      String displtype[5] = { F("TM1637 - 4 digit (colon)"),
+      String displtype[6] = { F("TM1637 - 4 digit (colon)"),
                               F("TM1637 - 4 digit (dots)"),
                               F("TM1637 - 6 digit"),
-                              F("MAX7219 - 8 digit") };
-      addFormSelector(F("Display Type"), F("plugin_073_displtype"), 4, displtype,
+                              F("MAX7219 - 8 digit"),
+                              F("MAX7219 - Matrix array")};
+      addFormSelector(F("Display Type"), F("plugin_073_displtype"), 5, displtype,
                       NULL, PCONFIG(0));
       String displout[6] = { F("Manual"),
                              F("Clock 24h - Blink"),
@@ -271,6 +277,14 @@ boolean Plugin_073(byte function, struct EventStruct *event, String& string) {
                       NULL, PCONFIG(1));
       addFormNumericBox(F("Brightness"), F("plugin_073_brightness"), PCONFIG(2),
                         0, 15);
+      String matrixhw[4] = { F("Generic"),
+                             F("FC-16"),
+                             F("Parola"),
+                             F("ICStation")};                  
+      addFormSelector(F("Matrix HW"), F("plugin_073_matrixhw"), 4, matrixhw,
+                      NULL, PCONFIG(3));
+      addFormNumericBox(F("Matrix count"), F("plugin_073_matrixcount"), PCONFIG(4),
+                        1, 8);
       success = true;
       break;
     }
@@ -279,6 +293,8 @@ boolean Plugin_073(byte function, struct EventStruct *event, String& string) {
       PCONFIG(0) = getFormItemInt(F("plugin_073_displtype"));
       PCONFIG(1) = getFormItemInt(F("plugin_073_displout"));
       PCONFIG(2) = getFormItemInt(F("plugin_073_brightness"));
+      PCONFIG(3) = getFormItemInt(F("plugin_073_matrixhw"));
+      PCONFIG(4) = getFormItemInt(F("plugin_073_matrixcount"));
       P073_data_struct *P073_data =
         static_cast<P073_data_struct *>(getPluginTaskData(event->TaskIndex));
 
@@ -289,6 +305,8 @@ boolean Plugin_073(byte function, struct EventStruct *event, String& string) {
         P073_data->displayModel = PCONFIG(0);
         P073_data->output       = PCONFIG(1);
         P073_data->brightness   = PCONFIG(2);
+        P073_data->matrixHW     = PCONFIG(3);
+        P073_data->matrixCount  = PCONFIG(4);
         P073_data->timesep      = true;
 
         switch (PCONFIG(0)) {
@@ -311,6 +329,16 @@ boolean Plugin_073(byte function, struct EventStruct *event, String& string) {
 
             if (PCONFIG(1) == P073_DISP_MANUAL) {
               max7219_ClearDisplay(event, CONFIG_PIN1, CONFIG_PIN2, CONFIG_PIN3);
+            }
+            break;
+          }
+          case P073_MAX7219_MATRIX:
+          {
+            max7219_Matrix_SetPowerBrightness(event, CONFIG_PIN1, CONFIG_PIN2, CONFIG_PIN3,
+                                       PCONFIG(2), true);
+
+            if (PCONFIG(1) == P073_DISP_MANUAL) {
+              max7219_Matrix_ClearDisplay(event, CONFIG_PIN1, CONFIG_PIN2, CONFIG_PIN3);
             }
             break;
           }
@@ -339,6 +367,8 @@ boolean Plugin_073(byte function, struct EventStruct *event, String& string) {
       P073_data->displayModel = PCONFIG(0);
       P073_data->output       = PCONFIG(1);
       P073_data->brightness   = PCONFIG(2);
+      P073_data->matrixHW     = PCONFIG(3);
+      P073_data->matrixCount  = PCONFIG(4);
 
       switch (PCONFIG(0)) {
         case P073_TM1637_4DGTCOLON:
@@ -352,6 +382,13 @@ boolean Plugin_073(byte function, struct EventStruct *event, String& string) {
         case P073_MAX7219_8DGT: {
           max7219_InitDisplay(event, CONFIG_PIN1, CONFIG_PIN2, CONFIG_PIN3);
           max7219_SetPowerBrightness(event, CONFIG_PIN1, CONFIG_PIN2, CONFIG_PIN3,
+                                     PCONFIG(2), true);
+          break;
+        }
+        case P073_MAX7219_MATRIX: {
+          max7219_Matrix_InitDisplay(event, CONFIG_PIN1, CONFIG_PIN2, CONFIG_PIN3, 
+                                     PCONFIG(3), PCONFIG(4));
+          max7219_Matrix_SetPowerBrightness(event, CONFIG_PIN1, CONFIG_PIN2, CONFIG_PIN3,
                                      PCONFIG(2), true);
           break;
         }
@@ -419,6 +456,11 @@ boolean Plugin_073(byte function, struct EventStruct *event, String& string) {
             max7219_ShowTime(event, P073_data->pin1, P073_data->pin2,
                              P073_data->pin3, P073_data->timesep);
           }
+          break;
+        }
+        case P073_MAX7219_MATRIX: {
+            max7219_Matrix_ShowTime(event, P073_data->pin1, P073_data->pin2,
+                             P073_data->pin3, P073_data->timesep);
           break;
         }
       }
@@ -489,6 +531,12 @@ bool p073_plugin_write(struct EventStruct *event, const String& string) {
                                      p073_displayon);
           break;
         }
+        case P073_MAX7219_MATRIX: {
+          max7219_Matrix_SetPowerBrightness(event, P073_data->pin1, P073_data->pin2,
+                                     P073_data->pin3, P073_data->brightness,
+                                     p073_displayon);
+          break;
+        }
       }
     }
     return p073_validcmd;
@@ -554,6 +602,18 @@ bool p073_plugin_write_7dn(struct EventStruct *event, const String& text) {
           P073_data->FillBufferWithDash();
         }
         max7219_ShowBuffer(event, P073_data->pin1, P073_data->pin2,
+                           P073_data->pin3);
+      }
+      break;
+    }
+    case P073_MAX7219_MATRIX: {
+      if (text.length() > 0) {
+        if ((event->Par1 > -10000000) && (event->Par1 < 100000000)) {
+          P073_data->FillBufferWithNumber(text.c_str());
+        } else {
+          P073_data->FillBufferWithDash();
+        }
+        max7219_Matrix_ShowBuffer(event, P073_data->pin1, P073_data->pin2,
                            P073_data->pin3);
       }
       break;
@@ -633,6 +693,16 @@ bool p073_plugin_write_7dt(struct EventStruct *event, const String& text) {
       max7219_ShowTemp(event, P073_data->pin1, P073_data->pin2, P073_data->pin3);
       break;
     }
+    case P073_MAX7219_MATRIX: {
+      p073_temptemp = int(p073_temptemp * 10);
+      P073_data->FillBufferWithTemp(p073_temptemp);
+
+      if (p073_temptemp == 0) {
+        P073_data->showbuffer[5] = 0;
+      }
+      max7219_Matrix_ShowTemp(event, P073_data->pin1, P073_data->pin2, P073_data->pin3);
+      break;
+    }
   }
   return true;
 }
@@ -676,6 +746,11 @@ bool p073_plugin_write_7dst(struct EventStruct *event) {
                        P073_data->timesep);
       break;
     }
+    case P073_MAX7219_MATRIX: {
+      max7219_Matrix_ShowTime(event, P073_data->pin1, P073_data->pin2, P073_data->pin3,
+                              P073_data->timesep);
+      break;
+    }
   }
   return true;
 }
@@ -717,6 +792,10 @@ bool p073_plugin_write_7dsd(struct EventStruct *event) {
       max7219_ShowDate(event, P073_data->pin1, P073_data->pin2, P073_data->pin3);
       break;
     }
+    case P073_MAX7219_MATRIX: {
+      max7219_ShowDate(event, P073_data->pin1, P073_data->pin2, P073_data->pin3);
+      break;
+    }
   }
   return true;
 }
@@ -746,7 +825,7 @@ bool p073_plugin_write_7dtext(struct EventStruct *event, const String& text) {
       break;
     }
     case P073_TM1637_6DGT: {
-      tm1637_SwapDigitInBuffer(event, 0); // only needed for 6-digits displays
+      tm1637_SwapDigitInBuffer(event, 0); // only neededfalse for 6-digits displays
       tm1637_ShowBuffer(event, 0, 6);
       break;
     }
@@ -754,6 +833,11 @@ bool p073_plugin_write_7dtext(struct EventStruct *event, const String& text) {
       P073_data->dotpos = -1; // avoid to display the dot
       max7219_ShowBuffer(event, P073_data->pin1, P073_data->pin2,
                          P073_data->pin3);
+      break;
+    }
+    case P073_MAX7219_MATRIX: {
+      max7219_Matrix_ShowBuffer(event, P073_data->pin1, P073_data->pin2,
+                                P073_data->pin3);
       break;
     }
   }
@@ -1199,6 +1283,161 @@ void max7219_ShowBuffer(struct EventStruct *event, uint8_t din_pin,
     max7219_SetDigit(event, din_pin, clk_pin, cs_pin, i,
                      P073_data->showbuffer[7 - i], dotflags[7 - i]);
   }
+}
+
+// =============================================================================================================
+
+#define CHAR_SPACING  1
+#define DELAYTIME 100
+
+MD_MAX72XX *mx = NULL;
+
+void max7219_Matrix_InitDisplay(struct EventStruct *event, uint8_t din_pin,
+                         uint8_t clk_pin, uint8_t cs_pin, byte matrixHW, uint8_t matrixCount) {
+  mx = new MD_MAX72XX((MD_MAX72XX::moduleType_t)(matrixHW), din_pin, clk_pin, cs_pin, matrixCount);
+  mx->begin();
+}
+
+void max7219_Matrix_SetPowerBrightness(struct EventStruct *event, uint8_t din_pin,
+                                uint8_t clk_pin, uint8_t cs_pin,
+                                uint8_t brightlvl, bool poweron) {
+  if (nullptr == mx ) {
+     return; 
+  }
+
+  mx->control(MD_MAX72XX::INTENSITY, brightlvl);
+  mx->control(MD_MAX72XX::SHUTDOWN, poweron ? MD_MAX72XX::OFF : MD_MAX72XX::ON);
+}
+
+void max7219_Matrix_ClearDisplay(struct EventStruct *event, uint8_t din_pin,
+                          uint8_t clk_pin, uint8_t cs_pin) {
+  if (nullptr == mx ) {
+     return; 
+  }
+  
+  mx->clear();
+}
+
+#define _SIZE 6
+
+void max7219_Matrix_ShowTime(struct EventStruct *event, uint8_t din_pin,
+                      uint8_t clk_pin, uint8_t cs_pin, bool sep) {
+  P073_data_struct *P073_data =
+    static_cast<P073_data_struct *>(getPluginTaskData(event->TaskIndex));
+
+  if (nullptr == P073_data) {
+    return;
+  }
+
+  if (nullptr == mx ) {
+     return; 
+  }
+
+  mx->clear();
+  mx->update(MD_MAX72XX::OFF);
+
+  mx->setChar(_SIZE-2, P073_data->showbuffer[5]+'0');
+  mx->setChar((2*_SIZE)-2, P073_data->showbuffer[4]+'0');
+  mx->setChar((3*_SIZE)-2, P073_data->showbuffer[3]+'0');
+  mx->setChar((4*_SIZE)-2, P073_data->showbuffer[2]+'0');
+  mx->setChar((5*_SIZE)-2, P073_data->showbuffer[1]+'0');
+  mx->setChar((6*_SIZE)-2, P073_data->showbuffer[0]+'0');
+
+  mx->update();
+  mx->update(MD_MAX72XX::ON);
+}
+
+void max7219_Matrix_ShowTemp(struct EventStruct *event, uint8_t din_pin,
+                      uint8_t clk_pin, uint8_t cs_pin) {
+}
+
+void max7219_Matrix_ShowDate(struct EventStruct *event, uint8_t din_pin,
+                      uint8_t clk_pin, uint8_t cs_pin) {
+}
+
+void printText(uint8_t modStart, uint8_t modEnd, char *pMsg)
+// Print the text string to the LED matrix modules specified.
+// Message area is padded with blank columns after printing.
+{
+  uint8_t   state = 0;
+  uint8_t   curLen = 0;
+  uint16_t  showLen = 0;
+  uint8_t   cBuf[8];
+  int16_t   col = ((modEnd + 1) * COL_SIZE) - 1;
+
+  mx->control(modStart, modEnd, MD_MAX72XX::UPDATE, MD_MAX72XX::OFF);
+
+  do     // finite state machine to print the characters in the space available
+  {
+    switch(state)
+    {
+      case 0: // Load the next character from the font table
+        // if we reached end of message, reset the message pointer
+        if (*pMsg == '\0')
+        {
+          showLen = col - (modEnd * COL_SIZE);  // padding characters
+          state = 2;
+          break;
+        }
+
+        // retrieve the next character form the font file
+        showLen = mx->getChar(*pMsg++, sizeof(cBuf)/sizeof(cBuf[0]), cBuf);
+        curLen = 0;
+        state++;
+        // !! deliberately fall through to next state to start displaying
+
+      case 1: // display the next part of the character
+        mx->setColumn(col--, cBuf[curLen++]);
+
+        // done with font character, now display the space between chars
+        if (curLen == showLen)
+        {
+          showLen = CHAR_SPACING;
+          state = 2;
+        }
+        break;
+
+      case 2: // initialize state for displaying empty columns
+        curLen = 0;
+        state++;
+        // fall through
+
+      case 3:	// display inter-character spacing or end of message padding (blank columns)
+        mx->setColumn(col--, 0);
+        curLen++;
+        if (curLen == showLen)
+          state = 0;
+        break;
+
+      default:
+        col = -1;   // this definitely P073_dataends the do loop
+    }
+  } while (col >= (modStart * COL_SIZE));
+
+  mx->control(modStart, modEnd, MD_MAX72XX::UPDATE, MD_MAX72XX::ON);
+}
+
+void max7219_Matrix_ShowBuffer(struct EventStruct *event, uint8_t din_pin,
+                        uint8_t clk_pin, uint8_t cs_pin) {
+    P073_data_struct *P073_data =
+    static_cast<P073_data_struct *>(getPluginTaskData(event->TaskIndex));
+
+  if (nullptr == P073_data) {
+    return;
+  }
+
+  if (nullptr == mx ) {
+     return; 
+  }
+
+  char buffer[8];
+
+  for(int i=0; i < 8; i++) {
+    
+    buffer[i] = (char)(P073_data->showbuffer[i]);
+  }
+
+  printText(0, mx->getDeviceCount(), buffer);
 }
 
 #endif // USES_P073
